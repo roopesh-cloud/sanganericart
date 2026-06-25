@@ -288,10 +288,10 @@ td{padding:.48rem .33rem;border-bottom:1px solid var(--sky)}
       <div id="lerr" class="alert alert-r" style="display:none"></div>
 
       <!-- Employee ID -->
-      <label class="lbl" style="color:#374151">Email Address</label>
+      <label class="lbl" style="color:#374151">Employee ID / Email</label>
       <div class="inp-icon-wrap">
         <span class="iico">📧</span>
-        <input class="inp" id="lid" type="email" placeholder="Enter your email address" onkeydown="if(event.key==='Enter')doLogin()" autocomplete="email" style="border-color:#E5E7EB">
+        <input class="inp" id="lid" type="text" placeholder="Employee ID ya Email darein" onkeydown="if(event.key==='Enter')doLogin()" autocomplete="email" style="border-color:#E5E7EB">
       </div>
 
       <!-- Password -->
@@ -760,7 +760,7 @@ let S={
     adminPassword:"admin123",
     securityQuestion:"Aapke company ka naam kya hai?",securityAnswer:"SANGANERICART"
   },
-  photos:{},salary:{},loc:null,holidays:[],leaves:[],deptAdmins:{MDO:{id:'mdo_admin',password:'mdo@123',name:'MDO Head'},HR:{id:'hr_admin',password:'hr@123',name:'HR Head'},Operations:{id:'ops_admin',password:'ops@123',name:'Operations Head'},MIS:{id:'mis_admin',password:'mis@123',name:'MIS Head'}},currentAdmin:null
+  photos:{},salary:{},loc:null,holidays:[],leaves:[],deptAdmins:[],currentAdmin:null
 };
 
 const todayStr=()=>new Date().toISOString().split("T")[0];
@@ -873,11 +873,14 @@ async function init(){
       S.leaves = Object.entries(lvSnap).map(([id,v])=>({id,...v}));
     }catch(e3){ S.leaves = []; }
 
-    // Load dept admins config
+    // Load dept admins from Firestore collection
     try{
-      const da = await fbG("settings","deptAdmins");
-      if(da) S.deptAdmins = {...S.deptAdmins,...da};
-    }catch(e4){}
+      const daSnap = await fbAll("deptAdmins");
+      const loadedAdmins = Object.values(daSnap);
+      S.deptAdmins = loadedAdmins.length > 0 ? loadedAdmins : [];
+    }catch(e5){ S.deptAdmins = []; }
+
+
 
   }catch(e){
     console.error("Firebase error:", e);
@@ -948,17 +951,22 @@ window.doLogin=async()=>{
   // Department Admin
   const deptAdm = S.deptAdmins.find(a=>a.id===id&&a.password===pw);
   if(deptAdm){
-    S.user={role:"deptAdmin",name:deptAdm.name,department:deptAdm.department,id:deptAdm.id};
+    S.user={role:"deptAdmin",name:deptAdm.name,department:deptAdm.department,dept:deptAdm.department,id:deptAdm.id};
     S.currentAdmin={role:"deptAdmin",department:deptAdm.department};
     S.att=await fbAll("attendance");S.salary=await fbAll("salary");
+    const deptLabel=deptAdm.department+" ADMIN PANEL";
     show("s-admin");rDash();
-    const dn2=$$("admin-name-display");if(dn2)dn2.textContent=`${DEPT_ICONS[deptAdm.department]||""} ${deptAdm.name}`;
-    $$("a-dt").textContent=`📅 ${DEPT_ICONS[deptAdm.department]||""} ${deptAdm.department} Department — `+new Date().toLocaleDateString("en-IN",{weekday:"long",day:"2-digit",month:"long",year:"numeric"});
-    // Hide Dept Admins & Settings tabs for dept admin
+    const dn2=$$("admin-name-display");if(dn2)dn2.textContent=(DEPT_ICONS[deptAdm.department]||"")+" "+deptAdm.name;
+    const dtEl=$$("a-dt");if(dtEl)dtEl.textContent="📅 "+deptAdm.department+" Department — "+new Date().toLocaleDateString("en-IN",{weekday:"long",day:"2-digit",month:"long",year:"numeric"});
+
     return;
   }
   // Employee login by email
-  const emp=S.emps.find(e=>e.email&&e.email.toLowerCase()===id.toLowerCase()&&e.password===pw);
+  // Employee login: allow Employee ID OR email
+  const emp=S.emps.find(e=>(
+    (e.id&&e.id===id) ||
+    (e.email&&e.email.toLowerCase()===id.toLowerCase())
+  )&&e.password===pw);
   if(emp){
     S.user={...emp,role:"emp"};
     const a=await fbG("attendance",emp.id);if(a)S.att[emp.id]=a;
@@ -1276,7 +1284,6 @@ async function rDash(){
   const t=todayStr(),allE=S.emps,a=S.att,s=S.sett;
   // Filter by department for dept admins
   const e = filterByDept(allE);
-  e = getVisibleEmps();
   const pres=e.filter(x=>a[x.id]?.[t]?.checkIn);
   const abs=e.filter(x=>!a[x.id]?.[t]?.checkIn);
   const lt=e.filter(x=>isLate(a[x.id]?.[t]?.checkIn,x.gender||"Male",s));
@@ -1294,7 +1301,7 @@ async function rDash(){
     const ph=S.photos[emp.id];const isFem=g==="Female";
     const av=ph?`<img src="${ph}" style="width:24px;height:24px;border-radius:50%;object-fit:cover">`:`<div style="width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,${isFem?"#9D174D,#BE185D":"#0B1A2E,#1E3A5F"});display:inline-flex;align-items:center;justify-content:center;color:white;font-size:.6rem;font-weight:900">${emp.name.charAt(0)}</div>`;
     const bm={Done:"bg",Present:"bb",Absent:"br"};
-    return `<tr><td><div style="display:flex;align-items:center;gap:.45rem">${av}<span style="font-weight:800;color:var(--navy);font-size:.78rem">${emp.name}${gpsTag}</span><span class="badge ${isFem?"bpk":"bb"}" style="font-size:.5rem">${isFem?"F":"M"}</span></div></td><td style="text-align:center;color:var(--slate);font-size:.7rem">${emp.id}</td><td style="text-align:center;color:var(--sage);font-weight:700">${ft(rec.checkIn)||"—"}</td><td style="text-align:center;color:var(--amber);font-weight:700">${ft(rec.checkOut)||"—"}</td><td style="text-align:center;font-weight:800">${hrs?hrs+"h":"—"}</td><td style="text-align:center"><span class="badge ${bm[st]}">${st}</span></td><td style="text-align:center">${l?`<span class="badge ba">Late</span>`:""}${ea?`<span class="badge bp">Early</span>`:""}</td></tr>`;
+    return `<tr><td><div style="display:flex;align-items:center;gap:.45rem">${av}<span style="font-weight:800;color:var(--navy);font-size:.78rem">${emp.name}</span><span class="badge ${isFem?"bpk":"bb"}" style="font-size:.5rem">${isFem?"F":"M"}</span></div></td><td style="text-align:center;color:var(--slate);font-size:.7rem">${emp.id}</td><td style="text-align:center;color:var(--sage);font-weight:700">${ft(rec.checkIn)||"—"}</td><td style="text-align:center;color:var(--amber);font-weight:700">${ft(rec.checkOut)||"—"}</td><td style="text-align:center;font-weight:800">${hrs?hrs+"h":"—"}</td><td style="text-align:center"><span class="badge ${bm[st]}">${st}</span></td><td style="text-align:center">${l?`<span class="badge ba">Late</span>`:""}${ea?`<span class="badge bp">Early</span>`:""}</td></tr>`;
   }).join("");
   $$("a-tbl").innerHTML=`<div style="overflow-x:auto"><table><thead><tr><th style="text-align:left">Employee</th><th>ID</th><th>In</th><th>Out</th><th>Hrs</th><th>Status</th><th>Remarks</th></tr></thead><tbody>${rows||"<tr><td colspan='7' style='text-align:center;padding:1.5rem;color:#94A3B8'>Koi employee nahi mila</td></tr>"}</tbody></table></div>`;
 }
@@ -1941,10 +1948,8 @@ const DEPT_COLORS = {MDO:"#1E3A5F",HR:"#C41E3A",Operations:"#1E8A5F",MIS:"#6D28D
 const DEPT_ICONS  = {MDO:"🏢",HR:"👔",Operations:"⚙️",MIS:"💻",Other:"📋"};
 
 function getMyDept(){
-  if(S.user?.role==="admin") return "ALL";
-  if(S.user?.role==="dept_admin")  return S.user.dept       ||S.user.department||"ALL";
-  if(S.user?.role==="deptAdmin")   return S.user.department ||S.user.dept      ||"ALL";
-  return "ALL";
+  if(!S.user||S.user.role==="admin") return "ALL";
+  return S.user.department||S.user.dept||"ALL";
 }
 
 window.addDeptAdmin = async () => {
@@ -2533,8 +2538,9 @@ window.changeDeptAdminPw = async () => {
   if(msgEl) msgEl.style.display = "none";
 
   // Validate current password
-  const dept   = S.user?.dept;
-  const stored = S.deptAdmins[dept]?.password;
+  const dept   = S.user?.dept || S.user?.department;
+  const deptAdmObj = S.deptAdmins.find(a=>a.department===dept||a.id===S.user?.id);
+  const stored = deptAdmObj?.password;
 
   if(curPw !== stored){
     if(msgEl){msgEl.className="alert alert-r";msgEl.textContent="❌ Current password galat hai!";msgEl.style.display="block";}
@@ -2551,8 +2557,8 @@ window.changeDeptAdminPw = async () => {
 
   // Save new password
   try{
-    S.deptAdmins[dept].password = newPw;
-    await fbS("settings","deptAdmins", S.deptAdmins);
+    if(deptAdmObj) deptAdmObj.password = newPw;
+    if(S.user?.id) await fbS("deptAdmins", S.user.id, {password: newPw});
     if(msgEl){msgEl.className="alert alert-g";msgEl.textContent="✅ Password successfully change ho gaya!";msgEl.style.display="block";}
     document.getElementById("da-cur-pw").value = "";
     document.getElementById("da-new-pw").value = "";
