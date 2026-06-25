@@ -159,12 +159,16 @@ td{padding:.48rem .33rem;border-bottom:1px solid var(--sky)}
       </div>
     </div>
     <div style="background:#E0EEFF;border-radius:9px;padding:.65rem .85rem;margin-bottom:1rem;font-size:.75rem;color:var(--steel)">
-      💡 Koi bhi field khali chodo agar sirf ek update karna hai
+      💡 Sirf jo field change karni hai woh bharo. Checkout reset karne ke liye "Reset Checkout" button dabao.
     </div>
+    <button class="btn btn-g btn-sm" onclick="resetCheckout()" style="margin-bottom:.85rem;color:var(--red)">
+      🔄 Reset Checkout (Galat checkout hatao)
+    </button>
     <div id="att-edit-err" class="alert alert-r" style="display:none"></div>
     <div id="att-edit-preview" style="display:none;background:#DCF5EC;border-radius:9px;padding:.7rem;margin-bottom:1rem;font-size:.8rem;color:#145C3E"></div>
-    <div style="display:flex;gap:.6rem">
+    <div style="display:flex;gap:.6rem;flex-wrap:wrap">
       <button class="btn btn-s" style="flex:1" onclick="saveAttEdit()">✓ Save Correction</button>
+      <button class="btn btn-am" onclick="resetCheckoutForEmp()" title="Galat checkout delete karo — employee phir se checkout kar sakta hai">🔄 Reset Checkout</button>
       <button class="btn btn-g" onclick="closeAttEdit()">Cancel</button>
     </div>
   </div>
@@ -216,6 +220,14 @@ td{padding:.48rem .33rem;border-bottom:1px solid var(--sky)}
       <button type="button" class="gender-btn" id="ed-gb-f" onclick="edSelGender('Female')">👩 Female</button>
       <button type="button" class="gender-btn" id="ed-gb-o" onclick="edSelGender('Other')">🧑 Other</button>
     </div>
+    <label class="lbl">Department</label>
+    <select class="inp" id="ed-dept" style="margin-bottom:.85rem">
+      <option value="MDO">MDO</option>
+      <option value="HR">HR</option>
+      <option value="Operations">Operations</option>
+      <option value="MIS">MIS</option>
+      <option value="Other">Other</option>
+    </select>
 
     <div style="background:var(--sky);border-radius:12px;padding:1rem;margin-bottom:.85rem">
       <div style="font-size:.65rem;font-weight:900;color:var(--red);letter-spacing:2px;margin-bottom:.7rem">🔐 PASSWORD CHANGE</div>
@@ -748,7 +760,7 @@ let S={
     adminPassword:"admin123",
     securityQuestion:"Aapke company ka naam kya hai?",securityAnswer:"SANGANERICART"
   },
-  photos:{},salary:{},loc:null,holidays:[],leaves:[],deptAdmins:{MDO:{id:'mdo_admin',password:'mdo@123',name:'MDO Head'},HR:{id:'hr_admin',password:'hr@123',name:'HR Head'},Operations:{id:'ops_admin',password:'ops@123',name:'Operations Head'},MIS:{id:'mis_admin',password:'mis@123',name:'MIS Head'}},deptAdmins:{MDO:{id:'',pw:''},HR:{id:'',pw:''},Operations:{id:'',pw:''},MIS:{id:'',pw:''}},currentRole:'',deptAdmins:[],currentAdmin:null
+  photos:{},salary:{},loc:null,holidays:[],leaves:[],deptAdmins:{MDO:{id:'mdo_admin',password:'mdo@123',name:'MDO Head'},HR:{id:'hr_admin',password:'hr@123',name:'HR Head'},Operations:{id:'ops_admin',password:'ops@123',name:'Operations Head'},MIS:{id:'mis_admin',password:'mis@123',name:'MIS Head'}},currentAdmin:null
 };
 
 const todayStr=()=>new Date().toISOString().split("T")[0];
@@ -828,6 +840,8 @@ async function init(){
     // Load employees
     const empSnap = await getDocs(collection(db,"employees"));
     S.emps = empSnap.docs.map(d=>({id:d.id,...d.data()}));
+    // Migrate old employees without department field
+    S.emps = S.emps.map(e=>({department:"Other",...e}));
     if(S.emps.length===0){
       const de={id:"A123",name:"Rahul",designation:"CRM",email:"rahul@sanganericart.com",phone:"9876543210",password:"rahul123",dob:"",salary:0,gender:"Male"};
       await fbS("employees","A123",de); S.emps=[de];
@@ -990,9 +1004,17 @@ function getVisibleEmps(){
   return S.emps;
 }
 
-function isDeptAdmin(){ return S.user?.role==="deptAdmin"; }
+function isDeptAdmin(){ return S.user?.role==="deptAdmin"||S.user?.role==="dept_admin"; }
 function isHRAdmin(){ return isDeptAdmin() && S.user?.dept==="HR"; }
-function isSuperAdmin(){ return S.user?.role==="admin"; }
+function isSuperAdmin(){ return S.user?.role==="admin"||S.currentAdmin?.role==="admin"; }
+function filterByDept(emps){
+  if(isSuperAdmin()) return emps;
+  const dept = getMyDept();
+  if(!dept || dept==="ALL") return emps;
+  // HR sees all departments
+  if(dept==="HR" && (S.user?.role==="deptAdmin"||S.user?.role==="dept_admin")) return emps;
+  return emps.filter(e=>(e.department&&e.department!=="Other"?e.department:"Other")===dept);
+}
 
 // Render Dept Admin Setup
 function renderDeptAdminList(){
@@ -1284,14 +1306,53 @@ window.selGender=(g)=>{
 };
 
 function rEmps(){
-  const t=todayStr();const emps=filterByDept(S.emps);$$("ecnt").textContent=`${emps.length} Employees ${isSuperAdmin()?"":"("+getMyDept()+" Dept)"}`;
+  const t=todayStr();
+  const emps=filterByDept(S.emps);
+  $$("ecnt").textContent=`${emps.length} Employees ${isSuperAdmin()?"":"("+getMyDept()+" Dept)"}`;
   $$("emp-list").innerHTML=emps.map(emp=>{
-    const g=emp.gender||"Male",isFem=g==="Female";
-    const totalDays=Object.values(S.att[emp.id]||{}).filter(r=>r.checkIn).length,ip=!!S.att[emp.id]?.[t]?.checkIn;
+    const ip=!!S.att[emp.id]?.[t]?.checkIn;
     const ph=S.photos[emp.id];
-    const av=ph?`<img src="${ph}" style="width:46px;height:46px;border-radius:50%;object-fit:cover;border:2px solid #CBD5E1">`:`<div style="width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,${isFem?"#9D174D,#BE185D":"#0B1A2E,#1E3A5F"});display:flex;align-items:center;justify-content:center;color:white;font-size:1.1rem;font-weight:900;flex-shrink:0">${emp.name.charAt(0)}</div>`;
-    const timC=isFem?"tc-female":"tc-male";const t2=getTimingForGender(g,S.sett);
-    return `<div class="card"><div style="display:flex;justify-content:space-between;align-items:flex-start"><div style="display:flex;gap:.82rem;flex:1;align-items:flex-start"><div style="position:relative">${av}<label style="position:absolute;bottom:-2px;right:-2px;background:#0B1A2E;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:.55rem;color:white;border:1.5px solid white">📷<input type="file" accept="image/*" style="display:none" onchange="aUp('${emp.id}',event)"></label></div><div style="flex:1"><div style="display:flex;align-items:center;gap:.45rem;flex-wrap:wrap"><span style="font-weight:900;color:var(--navy)">${emp.name}</span><span class="badge ${ip?"bg":"br"}">${ip?"Present":"Absent"}</span><span class="timing-chip ${timC}">${isFem?"👩":"👨"} ${t2.checkInTime}–${t2.checkOutTime}</span></div><div style="font-size:.71rem;color:var(--slate);margin-top:2px">${emp.designation||"—"}</div><div style="font-size:.68rem;color:var(--slate);margin-top:3px;display:flex;gap:.82rem;flex-wrap:wrap"><span>🪪 ${emp.id}</span><span>🏢 ${emp.department||"—"}</span><span>📅 ${totalDays} days</span>${emp.phone?`<span>📞 ${emp.phone}</span>`:""}</div></div></div><button class="btn btn-g btn-sm" onclick="delEmp('${emp.id}')" style="color:var(--red);margin-left:.4rem">🗑️</button></div></div>`;
+    const isFem=(emp.gender||"Male")==="Female";
+    const t2=getTimingForGender(emp.gender||"Male",S.sett);
+    const timC=isFem?"timing-chip-f":"timing-chip-m";
+    const totalDays=Object.values(S.att[emp.id]||{}).filter(r=>r.checkIn).length;
+    const av=ph
+      ?`<img src="${ph}" style="width:44px;height:44px;border-radius:50%;object-fit:cover">`
+      :`<div style="width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,#0B1A2E,#1E3A5F);display:flex;align-items:center;justify-content:center;color:white;font-weight:900;font-size:1.1rem">${emp.name.charAt(0)}</div>`;
+    const deptColor=({MDO:"#1E3A5F",HR:"#C41E3A",Operations:"#1E8A5F",MIS:"#6D28D9",Other:"#D97706"})[emp.department||"Other"]||"#64748B";
+    const deptLabel=emp.department||"Not Set";
+    return `<div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div style="display:flex;gap:.82rem;flex:1;align-items:flex-start">
+          <div style="position:relative">${av}
+            <label style="position:absolute;bottom:-2px;right:-2px;background:#0B1A2E;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:.55rem;color:white;border:1.5px solid white">
+              📷<input type="file" accept="image/*" style="display:none" onchange="aUp('${emp.id}',event)">
+            </label>
+          </div>
+          <div style="flex:1">
+            <div style="display:flex;align-items:center;gap:.45rem;flex-wrap:wrap">
+              <span style="font-weight:900;color:var(--navy)">${emp.name}</span>
+              <span class="badge ${ip?"bg":"br"}">${ip?"Present":"Absent"}</span>
+              <span class="timing-chip ${timC}">${isFem?"👩":"👨"} ${t2.checkInTime}–${t2.checkOutTime}</span>
+            </div>
+            <div style="font-size:.71rem;color:var(--slate);margin-top:2px">${emp.designation||"—"}</div>
+            <div style="font-size:.68rem;color:var(--slate);margin-top:3px;display:flex;gap:.65rem;flex-wrap:wrap;align-items:center">
+              <span>🪪 ${emp.id}</span>
+              <span style="background:${deptColor};color:white;padding:1px 7px;border-radius:10px;font-size:.62rem;font-weight:700">${deptLabel}${(!emp.department||emp.department==="Other")&&isSuperAdmin()?" ⚠️":""}</span>
+              <span>📅 ${totalDays} days</span>
+              ${emp.phone?`<span>📞 ${emp.phone}</span>`:""}
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:.3rem;margin-left:.4rem">
+          ${isSuperAdmin()
+            ?`<button class="btn btn-p btn-sm" onclick="openEditEmp('${emp.id}')">✏️ Edit</button>`
+            :""}
+          <button class="btn btn-am btn-sm" onclick="openAttEdit('${emp.id}','${emp.name}')">📅 Fix Att.</button>
+          <button class="btn btn-g btn-sm" onclick="delEmp('${emp.id}')" style="color:var(--red)">🗑️</button>
+        </div>
+      </div>
+    </div>`;
   }).join("");
 }
 
@@ -1465,6 +1526,7 @@ window.saveEditEmp = async () => {
     email: $$("ed-em").value.trim(),
     dob: $$("ed-dob").value,
     gender: edGender,
+    department: document.getElementById('ed-dept')?.value || oldEmp.department || 'Other',
   };
 
   // Update password only if provided
@@ -1584,6 +1646,85 @@ window.openAttEdit = (empId, empName) => {
 window.closeAttEdit = () => {
   document.getElementById("att-edit-modal").classList.remove("on");
   _attEditEmpId = null;
+};
+
+window.resetCheckoutEdit = async () => {
+  const date  = document.getElementById("att-edit-date")?.value;
+  const empId = _attEditEmpId;
+  if(!date||!empId){toast("Date select karein pehle!");return;}
+  
+  const rec = S.att[empId]?.[date];
+  if(!rec?.checkIn){toast("⚠️ Is date par check-in record nahi hai!");return;}
+  if(!rec.checkOut){toast("⚠️ Checkout already nahi hua hai!");return;}
+  
+  if(!confirm("Kya aap " + date + " ka checkout reset karna chahte hain? Employee wapas check-out kar sakta hai.")){return;}
+  
+  // Remove checkout
+  delete rec.checkOut;
+  rec.checkoutReset = true;
+  rec.resetBy = S.user?.name || "Admin";
+  rec.resetAt = new Date().toISOString();
+  
+  S.att[empId][date] = rec;
+  
+  try{
+    await fbS("attendance", empId, S.att[empId]);
+    toast("✅ Checkout reset ho gaya! Employee ab dobara check-out kar sakta hai.");
+    // Clear the out field
+    const outEl = document.getElementById("att-edit-out");
+    if(outEl) outEl.value = "";
+    closeAttEdit();
+    if(S.user?.role==="admin") rDash();
+  }catch(e){toast("⚠️ Reset failed: "+e.message);}
+};
+
+window.resetCheckout = async () => {
+  const date  = document.getElementById("att-edit-date")?.value;
+  const empId = _attEditEmpId;
+  if(!date || !empId){ toast("Please select a date first!"); return; }
+  if(!S.att[empId]?.[date]?.checkIn){ toast("No check-in found for this date!"); return; }
+  if(!confirm("Are you sure you want to REMOVE the checkout for " + date + "?")) return;
+
+  delete S.att[empId][date].checkOut;
+  delete S.att[empId][date].outLat;
+  delete S.att[empId][date].outLng;
+
+  try{
+    await fbS("attendance", empId, S.att[empId]);
+    toast("✅ Checkout removed! Employee can check out again.");
+    closeAttEdit();
+    if(S.user?.role==="admin") rDash();
+  }catch(e){ toast("⚠️ Failed: "+e.message); }
+};
+
+window.resetCheckoutForEmp = async () => {
+  const date  = document.getElementById("att-edit-date")?.value;
+  const empId = _attEditEmpId;
+  if(!date || !empId) { toast("Date select karein pehle!"); return; }
+
+  if(!S.att[empId]?.[date]?.checkIn) {
+    const errEl = document.getElementById("att-edit-err");
+    if(errEl){errEl.textContent="Is din ka check-in record nahi mila!";errEl.style.display="block";}
+    return;
+  }
+  if(!confirm("Kya aap " + date + " ka checkout reset karna chahte hain? Employee phir se checkout kar sakta hai.")) return;
+
+  // Remove only checkOut, keep checkIn
+  const rec = {...S.att[empId][date]};
+  delete rec.checkOut;
+  rec.checkoutReset = true;
+  rec.resetBy = S.user?.name || "Admin";
+  rec.resetAt = new Date().toISOString();
+  S.att[empId][date] = rec;
+
+  try {
+    await fbS("attendance", empId, S.att[empId]);
+    toast("✅ Checkout reset ho gaya! Employee ab dobara checkout kar sakta hai.");
+    closeAttEdit();
+    rDash();
+  } catch(e) {
+    toast("⚠️ Reset failed: " + e.message);
+  }
 };
 
 window.saveAttEdit = async () => {
@@ -1799,7 +1940,12 @@ window.importSalarySheet = (event) => {
 const DEPT_COLORS = {MDO:"#1E3A5F",HR:"#C41E3A",Operations:"#1E8A5F",MIS:"#6D28D9",Other:"#D97706"};
 const DEPT_ICONS  = {MDO:"🏢",HR:"👔",Operations:"⚙️",MIS:"💻",Other:"📋"};
 
-function getMyDept(){ return S.currentAdmin?.department||"ALL"; }
+function getMyDept(){
+  if(S.user?.role==="admin") return "ALL";
+  if(S.user?.role==="dept_admin")  return S.user.dept       ||S.user.department||"ALL";
+  if(S.user?.role==="deptAdmin")   return S.user.department ||S.user.dept      ||"ALL";
+  return "ALL";
+}
 
 window.addDeptAdmin = async () => {
   const id=$$("da-id")?.value.trim();
